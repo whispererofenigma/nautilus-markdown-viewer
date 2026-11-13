@@ -214,9 +214,9 @@ class MarkdownViewerWindow(Adw.ApplicationWindow):
         self.header.pack_end(ext_menu_btn)
 
         # Zoom Controls MenuButton
-        zoom_btn = Gtk.MenuButton(
+        self.zoom_btn = Gtk.MenuButton(
             icon_name="zoom-original-symbolic",
-            tooltip_text="Zoom Controls"
+            tooltip_text="Zoom (100%)"
         )
         zoom_popover = Gtk.Popover()
         zoom_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -227,17 +227,17 @@ class MarkdownViewerWindow(Adw.ApplicationWindow):
 
         btn_zoom_out = Gtk.Button(icon_name="zoom-out-symbolic", tooltip_text="Zoom Out (Ctrl -)")
         btn_zoom_out.connect("clicked", lambda _: self.adjust_zoom(-0.1))
-        btn_zoom_reset = Gtk.Button(label="100%", tooltip_text="Reset Zoom (Ctrl 0)")
-        btn_zoom_reset.connect("clicked", lambda _: self.reset_zoom())
+        self.btn_zoom_reset = Gtk.Button(label="100%", tooltip_text="Reset Zoom (Ctrl 0)")
+        self.btn_zoom_reset.connect("clicked", lambda _: self.reset_zoom())
         btn_zoom_in = Gtk.Button(icon_name="zoom-in-symbolic", tooltip_text="Zoom In (Ctrl +)")
         btn_zoom_in.connect("clicked", lambda _: self.adjust_zoom(+0.1))
 
         zoom_box.append(btn_zoom_out)
-        zoom_box.append(btn_zoom_reset)
+        zoom_box.append(self.btn_zoom_reset)
         zoom_box.append(btn_zoom_in)
         zoom_popover.set_child(zoom_box)
-        zoom_btn.set_popover(zoom_popover)
-        self.header.pack_end(zoom_btn)
+        self.zoom_btn.set_popover(zoom_popover)
+        self.header.pack_end(self.zoom_btn)
 
         # Reload Button
         self.reload_btn = Gtk.Button(
@@ -509,12 +509,21 @@ class MarkdownViewerWindow(Adw.ApplicationWindow):
         self.lbl_stats_time.set_markup(f"<b>Reading Time:</b> {self.stats.get('read_time', '~1 min')}")
 
     def adjust_zoom(self, delta: float):
-        self.zoom_level = max(0.5, min(2.5, self.zoom_level + delta))
+        self.zoom_level = max(0.5, min(2.5, round(self.zoom_level + delta, 2)))
         self.webview.set_zoom_level(self.zoom_level)
+        self.update_zoom_ui()
 
     def reset_zoom(self):
         self.zoom_level = 1.0
         self.webview.set_zoom_level(1.0)
+        self.update_zoom_ui()
+
+    def update_zoom_ui(self):
+        percentage = int(round(self.zoom_level * 100))
+        if hasattr(self, "btn_zoom_reset") and self.btn_zoom_reset:
+            self.btn_zoom_reset.set_label(f"{percentage}%")
+        if hasattr(self, "zoom_btn") and self.zoom_btn:
+            self.zoom_btn.set_tooltip_text(f"Zoom ({percentage}%)")
 
     def on_cycle_theme(self, _button):
         if self.theme_mode == "auto":
