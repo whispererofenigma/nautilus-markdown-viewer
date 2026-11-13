@@ -1,0 +1,15 @@
+[Desktop Entry]
+Name=Markdown Previewer
+Comment=Rich previewer for Markdown documents in Nautilus
+Exec=/home/whispererofenigma/.local/bin/markdown-preview %U
+Icon=text-x-generic
+Terminal=false
+Type=Application
+Categories=Utility;TextEditor;Viewer;GNOME;GTK;
+MimeType=text/markdown;text/x-markdown;text/plain;
+StartupNotify=true
+Actions=NewWindow;
+
+[Desktop Action NewWindow]
+Name=Open New Preview Window
+Exec=/home/whispererofenigma/.local/bin/markdown-preview %U

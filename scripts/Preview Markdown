@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Nautilus script to preview markdown files
+PREVIEWER="$HOME/.local/bin/markdown-preview"
+if [ ! -x "$PREVIEWER" ]; then
+    PREVIEWER="$HOME/.local/share/nautilus-markdown-viewer/markdown-preview"
+fi
+
+if [ -n "$NAUTILUS_SCRIPT_SELECTED_FILE_PATHS" ]; then
+    echo "$NAUTILUS_SCRIPT_SELECTED_FILE_PATHS" | while IFS= read -r file; do
+        if [ -n "$file" ]; then
+            "$PREVIEWER" "$file" &
+        fi
+    done
+elif [ "$#" -gt 0 ]; then
+    for file in "$@"; do
+        "$PREVIEWER" "$file" &
+    done
+fi

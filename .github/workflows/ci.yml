@@ -1,0 +1,40 @@
+name: CI & Package Build
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  validate-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Linting & Verification Tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 markdown pygments
+
+      - name: Verify Python Code Syntax
+        run: |
+          python -m py_compile src/viewer/*.py src/extension/*.py
+
+      - name: Build Debian Package (.deb)
+        run: |
+          chmod +x packaging/build-deb.sh
+          ./packaging/build-deb.sh
+
+      - name: Upload Debian Package Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nautilus-markdown-viewer-deb
+          path: "*.deb"
