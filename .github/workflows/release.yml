@@ -36,3 +36,27 @@ jobs:
           gh release create "$RELEASE_TAG" nautilus-markdown-viewer_*.deb SHA256SUMS \
             --verify-tag --title "Nautilus Markdown Viewer $RELEASE_TAG" \
             --notes-file "docs/releases/$RELEASE_TAG.md"
+
+  launchpad-ppa:
+    needs: checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install packaging tools
+        run: |
+          sudo sed -i 's/^#precedence ::ffff:0:0\/96  100/precedence ::ffff:0:0\/96  100/' /etc/gai.conf || true
+          sudo apt-get update
+          sudo apt-get install -y dput dpkg-dev
+      - name: Build, sign, and upload to Launchpad PPA
+        env:
+          LAUNCHPAD_GPG_KEY: ${{ secrets.LAUNCHPAD_GPG_KEY }}
+        run: |
+          if [ -n "$LAUNCHPAD_GPG_KEY" ]; then
+            echo "Importing Launchpad GPG signing key..."
+            echo "$LAUNCHPAD_GPG_KEY" | gpg --batch --import
+            bash packaging/build-source.sh
+            dput ppa:whispererofenigma/nautilus-markdown-viewer dist/source/*_source.changes
+            echo "Successfully uploaded source package to Launchpad PPA."
+          else
+            echo "LAUNCHPAD_GPG_KEY secret not found; skipping PPA upload."
+          fi

@@ -68,7 +68,7 @@ if [[ -n "$SIGN_KEY" ]]; then
     printf '  DSC: %s\n' "${OUTPUT_DIR}/$(basename "$DSC_FILE")"
     printf '  Changes: %s\n' "${OUTPUT_DIR}/$(basename "$CHANGES_FILE")"
     printf 'Upload to Launchpad using:\n'
-    printf '  dput ppa:whispererofenigma/<ppa-name> %s\n' "${OUTPUT_DIR}/$(basename "$CHANGES_FILE")"
+    printf '  dput ppa:whispererofenigma/nautilus-markdown-viewer %s\n' "${OUTPUT_DIR}/$(basename "$CHANGES_FILE")"
 else
     (
         cd "${SOURCE_DIR}/${SOURCE_NAME}"
