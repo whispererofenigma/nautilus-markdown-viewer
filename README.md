@@ -1,6 +1,7 @@
 # Nautilus Markdown Viewer
 
 [![CI](https://github.com/whispererofenigma/nautilus-markdown-viewer/actions/workflows/ci.yml/badge.svg)](https://github.com/whispererofenigma/nautilus-markdown-viewer/actions/workflows/ci.yml)
+[![Ubuntu PPA](https://img.shields.io/badge/Ubuntu%20PPA-nautilus--markdown--viewer-orange.svg)](https://launchpad.net/~whispererofenigma/+archive/ubuntu/nautilus-markdown-viewer)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 
 Preview and edit Markdown in GNOME Files. Nautilus Markdown Viewer adds a
@@ -49,9 +50,20 @@ supported installation target with its default package set.
 ## Installation
 
 Choose **one** installation method. A user installation can shadow a system
-package; remove the user installation before switching to the `.deb`.
+package; remove the user installation before switching to the system package.
 
-### Ubuntu / Debian package
+### Ubuntu PPA (Recommended)
+
+Automatic installation and updates for Ubuntu 24.04 LTS and compatible distributions:
+
+```sh
+sudo add-apt-repository ppa:whispererofenigma/nautilus-markdown-viewer
+sudo apt update
+sudo apt install nautilus-markdown-viewer
+nautilus -q
+```
+
+### Standalone Debian / Ubuntu package (.deb)
 
 Download the `.deb` and `SHA256SUMS` from a [release](https://github.com/whispererofenigma/nautilus-markdown-viewer/releases).
 For releases that include checksums, place both files in the same directory and
@@ -84,17 +96,27 @@ if the terminal cannot find `markdown-preview`.
 
 ### Updates and removal
 
-For a package installation, install the newer release with `sudo apt install
-./<downloaded-package>.deb`. There is currently no project apt repository.
-Remove the package with:
+- **PPA users:** updates arrive automatically with normal system updates:
+  ```sh
+  sudo apt update && sudo apt upgrade
+  ```
+- **Manual package users:** download and install the newer release with `sudo apt install ./<package>.deb`.
+- **Source users:** update your checkout and rerun `bash install.sh`.
+
+To remove the system package:
 
 ```sh
 sudo apt remove nautilus-markdown-viewer
 nautilus -q
 ```
 
-For a source installation, update your checkout and rerun `bash install.sh`.
-Run `bash uninstall.sh` from the checkout to remove the user installation.
+To remove the Launchpad PPA:
+
+```sh
+sudo add-apt-repository --remove ppa:whispererofenigma/nautilus-markdown-viewer
+```
+
+For a source installation, run `bash uninstall.sh` from the checkout to remove the user installation.
 Neither uninstall method removes your Markdown documents.
 
 ## Usage
