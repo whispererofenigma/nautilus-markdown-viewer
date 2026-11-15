@@ -15,38 +15,48 @@ inside the host Nautilus process.
 ## Ubuntu PPA preparation
 
 No official project PPA is published yet. The repository includes Debian source
-packaging for a maintainer to build, review, and upload. Use a clean committed
-checkout and install the packaging tools:
+packaging for a maintainer to build, sign, and upload to Launchpad.
+
+### Automated source package and signature
+
+If you have your registered OpenPGP secret key in your GPG keyring, `packaging/build-source.sh`
+automatically signs both the `.dsc` and `_source.changes` with your key:
 
 ```sh
-sudo apt install build-essential debhelper dh-python devscripts dpkg-dev \
-  python3-markdown python3-pygments
+# Generate and sign the source package for Ubuntu 24.04 (noble)
 bash packaging/build-source.sh
 ```
 
-The unsigned `.dsc`, original source archive, and Debian archive are written to
-`dist/source/`. The default target is Ubuntu 24.04 (`noble`), revision `1~ppa1`.
-Use a new revision for every upload, for example `REVISION=1~ppa2`. Do not claim
-support for a new distribution until its dependency resolution and desktop runtime
-have been tested.
+The signed `.dsc`, `.orig.tar.gz`, `.debian.tar.xz`, and `_source.changes` are written
+to `dist/source/`. The default target is Ubuntu 24.04 (`noble`), revision `1~ppa1`.
+Use a new revision for every upload, for example `REVISION=1~ppa2 bash packaging/build-source.sh`.
+To target a different series (e.g. `oracular` or `jammy`), specify `SERIES=<name>`.
 
-Before upload, extract and build the source package in an appropriate clean Ubuntu
-build environment (for example sbuild). Smoke-test the resulting binary package in
-a fresh desktop account. To prepare the signed source upload after those checks:
+### Uploading to Launchpad
+
+1. Activate your PPA on Launchpad at `https://launchpad.net/~<username>/+activate-ppa`.
+2. Install `dput`:
+   ```sh
+   sudo apt install dput
+   ```
+3. Upload the signed changes file:
+   ```sh
+   dput ppa:<username>/<ppa-name> dist/source/nautilus-markdown-viewer_1.1.0-1~ppa1_source.changes
+   ```
+
+Launchpad will verify your OpenPGP signature against your registered Launchpad key,
+accept the upload into its build queue, and automatically build the binary `.deb`
+package for the targeted Ubuntu architecture(s).
+
+### Manual build alternative
+
+You can also inspect, extract, and build manually using standard Debian tooling:
 
 ```sh
-# Run in a separate temporary working directory; adjust the path to your checkout.
-dpkg-source -x /path/to/checkout/dist/source/nautilus-markdown-viewer_1.1.0-1~ppa1.dsc
+dpkg-source -x dist/source/nautilus-markdown-viewer_1.1.0-1~ppa1.dsc
 cd nautilus-markdown-viewer-1.1.0
 debuild -S -sa -kYOUR_REGISTERED_KEY_FINGERPRINT
-# Upload the generated *_source.changes with dput to your activated PPA.
 ```
-
-Launchpad requires an account, an activated PPA, and an associated OpenPGP key.
-Never commit private signing keys. Follow the official
-[source-package upload guide](https://ubuntu.com/docs/launchpad/user/how-to/packaging/build-deb-packages-in-launchpad/)
-for signing and the exact `dput` destination. A source archive is not proof of a
-successful Launchpad build; publish installation instructions only after it succeeds.
 
 ## Other distribution formats
 
