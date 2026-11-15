@@ -4,10 +4,16 @@ and Reading Metrics.
 """
 
 import os
+import html
+import json
+import xml.etree.ElementTree as ET
 import re
 from typing import Dict, List, Tuple
 import markdown
 from pygments.formatters import HtmlFormatter
+from markdown.extensions import Extension
+from markdown.preprocessors import Preprocessor
+from markdown.treeprocessors import Treeprocessor
 
 from styles import get_complete_css
 
@@ -21,11 +27,79 @@ ALERT_ICONS = {
 }
 
 
+class LanguageFormatter(HtmlFormatter):
+    def __init__(self, lang_str="language-text", **options):
+        super().__init__(**options)
+        self.cssclass = "codehilite " + lang_str
+
+
+class AlertProcessor(Preprocessor):
+    def run(self, lines):
+        # Fenced code has already been stashed by the fenced_code extension.
+        return MarkdownRenderer.preprocess_alerts("\n".join(lines)).split("\n")
+
+
+class MathProcessor(Preprocessor):
+    """Keep TeX delimiters and underscores intact until MathJax sees the DOM."""
+
+    pattern = re.compile(
+        r"(?P<indent>^(?: {4}|\t)[^\n]*(?:\n|$))|"
+        r"(?P<code>`+[^`]*`+)|"
+        r"(?P<math>\\\[.*?\\\]|\\\(.*?\\\)|"
+        r"(?<!\\)\$\$.*?(?<!\\)\$\$|"
+        r"(?<!\\)\$(?!\$)[^\n$]+?(?<!\\)\$(?!\$))",
+        re.DOTALL | re.MULTILINE,
+    )
+
+    def run(self, lines):
+        def preserve(match):
+            if match.group("code") or match.group("indent"):
+                return match.group(0)
+            equation = html.escape(match.group("math"))
+            return self.md.htmlStash.store(f'<span class="math">{equation}</span>')
+
+        return self.pattern.sub(preserve, "\n".join(lines)).split("\n")
+
+
+class TaskProcessor(Treeprocessor):
+    def run(self, root):
+        for item in root.iter("li"):
+            target = item.find("p")
+            if target is None:
+                target = item
+            match = re.match(r"^\[([ xX])\]\s+", target.text or "")
+            if match:
+                target.text = target.text[match.end() :]
+                checkbox = ET.Element(
+                    "input",
+                    {
+                        "type": "checkbox",
+                        "disabled": "disabled",
+                        "aria-label": "Task status",
+                    },
+                )
+                if match.group(1).lower() == "x":
+                    checkbox.set("checked", "checked")
+                checkbox.tail, target.text = " " + target.text, None
+                target.insert(0, checkbox)
+                item.set("class", "task-list-item")
+
+
+class PreviewExtension(Extension):
+    def extendMarkdown(self, md):
+        md.preprocessors.register(AlertProcessor(md), "github_alerts", 24)
+        md.preprocessors.register(MathProcessor(md), "math", 23)
+        md.treeprocessors.register(TaskProcessor(md), "task_lists", 15)
+
+
 class MarkdownRenderer:
-    def __init__(self):
+    def __init__(self, fragment=False):
+        self.fragment = fragment
         self.md_parser = markdown.Markdown(
             extensions=[
                 "fenced_code",
+                "md_in_html",
+                PreviewExtension(),
                 "tables",
                 "toc",
                 "nl2br",
@@ -34,7 +108,8 @@ class MarkdownRenderer:
             ],
             extension_configs={
                 "codehilite": {
-                    "guess_lang": True,
+                    "guess_lang": False,
+                    "pygments_formatter": LanguageFormatter,
                     "css_class": "codehilite",
                     "use_pygments": True,
                 },
@@ -44,7 +119,8 @@ class MarkdownRenderer:
             },
         )
 
-    def preprocess_alerts(self, text: str) -> str:
+    @staticmethod
+    def preprocess_alerts(text: str) -> str:
         """Preprocesses GitHub-style alerts (> [!NOTE]) into styled HTML blocks."""
         alert_types = r"(NOTE|TIP|IMPORTANT|WARNING|CAUTION)"
         pattern = re.compile(
@@ -59,7 +135,7 @@ class MarkdownRenderer:
             body = "\n".join(stripped)
             icon = ALERT_ICONS.get(atype, "")
             return (
-                f'<div class="markdown-alert markdown-alert-{atype.lower()}">\n'
+                f'<div class="markdown-alert markdown-alert-{atype.lower()}" markdown="1">\n'
                 f'<div class="markdown-alert-title">{icon} {atype.capitalize()}</div>\n\n'
                 f"{body}\n\n"
                 f"</div>\n"
@@ -67,35 +143,18 @@ class MarkdownRenderer:
 
         return pattern.sub(repl, text)
 
-    def preprocess_task_lists(self, text: str) -> str:
-        """Converts [ ] and [x] into accessible task list items."""
-        text = re.sub(
-            r"^(\s*)-\s+\[ \]\s+(.*)$",
-            r'\1- <span class="task-list-item"><input type="checkbox" disabled> \2</span>',
-            text,
-            flags=re.MULTILINE,
-        )
-        text = re.sub(
-            r"^(\s*)-\s+\[[xX]\]\s+(.*)$",
-            r'\1- <span class="task-list-item"><input type="checkbox" checked disabled> \2</span>',
-            text,
-            flags=re.MULTILINE,
-        )
-        return text
-
     def postprocess_code_blocks(self, html: str) -> str:
         """Wraps pygments code blocks in a styled card with language badge and copy button."""
         pattern = re.compile(
-            r'(<div class="codehilite">)(<pre><span></span><code>|<pre>)(.*?)(</code></pre>|</pre>)(</div>)',
+            r'(<div class="codehilite[^"]*">)(<pre><span></span><code>|<pre>)(.*?)(</code></pre>|</pre>)(</div>)',
             re.DOTALL,
         )
 
         def repl(match):
             full_match = match.group(0)
-            code_content = match.group(3)
 
             # Try to detect language from class or comments
-            lang_match = re.search(r'class="[a-zA-Z0-9_-]*language-([a-zA-Z0-9_+]+)', full_match)
+            lang_match = re.search(r"language-([a-zA-Z0-9_+.-]+)", full_match)
             lang = lang_match.group(1) if lang_match else "code"
 
             return (
@@ -106,30 +165,19 @@ class MarkdownRenderer:
                 f'      <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">'
                 f'        <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"></path>'
                 f'        <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"></path>'
-                f'      </svg>'
-                f'      Copy'
-                f'    </button>'
-                f'  </div>'
-                f'  {full_match}'
-                f'</div>'
+                f"      </svg>"
+                f"      Copy"
+                f"    </button>"
+                f"  </div>"
+                f"  {full_match}"
+                f"</div>"
             )
 
         return pattern.sub(repl, html)
 
-    def extract_toc(self, html: str) -> List[Tuple[int, str, str]]:
-        """Extracts (level, id, title) from HTML headings."""
-        headings = []
-        pattern = re.compile(r'<h([1-6])\s+id="([^"]+)">([^<]+)(?:<a\s+[^>]*>.*?</a>)?</h\1>', re.IGNORECASE)
-        for m in pattern.finditer(html):
-            level = int(m.group(1))
-            h_id = m.group(2)
-            title = re.sub(r'<[^>]+>', '', m.group(3)).strip()
-            headings.append((level, h_id, title))
-        return headings
-
     def compute_stats(self, raw_text: str) -> Dict[str, str]:
         """Calculates word count, character count, and estimated reading time."""
-        words = re.findall(r'\b\w+\b', raw_text)
+        words = re.findall(r"\b\w+\b", raw_text)
         word_count = len(words)
         char_count = len(raw_text)
         reading_time_mins = max(1, round(word_count / 200))
@@ -139,20 +187,34 @@ class MarkdownRenderer:
             "read_time": f"{reading_time_mins} min read",
         }
 
-    def render(self, raw_md: str, file_path: str = "") -> Tuple[str, List[Tuple[int, str, str]], Dict[str, str]]:
+    def render(
+        self, raw_md: str, file_path: str = ""
+    ) -> Tuple[str, List[Tuple[int, str, str]], Dict[str, str]]:
         """Renders raw Markdown into complete HTML string with TOC and stats."""
         stats = self.compute_stats(raw_md)
-        processed = self.preprocess_alerts(raw_md)
-        processed = self.preprocess_task_lists(processed)
-
-        # Reset markdown state
         self.md_parser.reset()
-        body_html = self.md_parser.convert(processed)
+        body_html = self.md_parser.convert(raw_md)
         body_html = self.postprocess_code_blocks(body_html)
-        toc = self.extract_toc(body_html)
+        toc = []
+
+        def flatten(tokens):
+            for token in tokens:
+                toc.append((token["level"], token["id"], html.unescape(token["name"])))
+                flatten(token.get("children", []))
+
+        flatten(self.md_parser.toc_tokens)
+        if self.fragment:
+            return body_html, toc, stats
 
         filename = os.path.basename(file_path) if file_path else "Markdown Document"
+        filename = html.escape(filename)
+        scroll_key = json.dumps("md_scroll_" + os.path.abspath(file_path)).replace(
+            "<", "\\u003c"
+        )
         complete_css = get_complete_css()
+        math_script = ""
+        if 'class="math"' in body_html:
+            math_script = '<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>'
 
         full_html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -167,29 +229,96 @@ class MarkdownRenderer:
         svg: {{ fontCache: 'global' }}
     }};
     </script>
-    <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    {math_script}
     <style>
     {complete_css}
     </style>
 </head>
 <body>
+    <div id="reading-progress" aria-hidden="true"></div>
     <div class="markdown-container">
         {body_html}
     </div>
 
     <script>
-    // Scroll restoration across hot reloads
+    // Store at most once after a scroll burst, using the actual document path.
+    let scrollKey = {scroll_key};
+    let scrollTimer;
     function saveScroll() {{
-        localStorage.setItem('md_scroll_' + encodeURIComponent(location.pathname), window.scrollY);
+        try {{ localStorage.setItem(scrollKey, String(window.scrollY)); }} catch (_) {{}}
+    }}
+    function updateProgress() {{
+        const range = document.documentElement.scrollHeight - window.innerHeight;
+        document.getElementById('reading-progress').style.transform =
+            'scaleX(' + (range > 0 ? window.scrollY / range : 0) + ')';
     }}
     function restoreScroll() {{
-        const y = localStorage.getItem('md_scroll_' + encodeURIComponent(location.pathname));
-        if (y !== null) {{
-            window.scrollTo(0, parseInt(y, 10));
-        }}
+        try {{ window.scrollTo(0, Number(localStorage.getItem(scrollKey)) || 0); }} catch (_) {{}}
+        updateProgress();
     }}
-    window.addEventListener('scroll', saveScroll, {{ passive: true }});
+    window.addEventListener('scroll', () => {{
+        clearTimeout(scrollTimer);
+        scrollTimer = setTimeout(saveScroll, 150);
+        requestAnimationFrame(updateProgress);
+    }}, {{ passive: true }});
+    window.addEventListener('pagehide', saveScroll);
     window.addEventListener('DOMContentLoaded', restoreScroll);
+    window.addEventListener('resize', updateProgress);
+
+    // The side panel keeps this page alive across file selections.
+    let documentRevision = 0;
+    function replaceDocument(source, baseURI, nextScrollKey, title, revision) {{
+        const started = performance.now();
+        saveScroll();
+        clearTimeout(scrollTimer);
+        const fragment = document.createElement('template');
+        fragment.innerHTML = source;
+        const parsedAt = performance.now();
+        const content = document.querySelector('.markdown-container');
+        if (window.MathJax && MathJax.typesetClear) MathJax.typesetClear([content]);
+        let base = document.querySelector('base');
+        if (!base) {{
+            base = document.createElement('base');
+            document.head.prepend(base);
+        }}
+        base.href = baseURI;
+        document.title = title;
+        content.replaceChildren(fragment.content);
+        scrollKey = nextScrollKey;
+        const insertedAt = performance.now();
+        restoreScroll();
+        const layoutAt = performance.now();
+        documentRevision += 1;
+        if (source.includes('class="math"')) {{
+            if (window.MathJax && MathJax.typesetPromise) {{
+                MathJax.typesetPromise([content]).catch(() => {{}});
+            }} else if (!document.getElementById('mathjax-loader')) {{
+                const script = document.createElement('script');
+                script.id = 'mathjax-loader';
+                script.src = 'https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js';
+                script.async = true;
+                script.onerror = () => script.remove();
+                document.head.append(script);
+            }}
+        }}
+        requestAnimationFrame(() => requestAnimationFrame(() => {{
+            const handler = window.webkit?.messageHandlers?.markdownPreviewReady;
+            if (handler) handler.postMessage(String(revision));
+        }}));
+        return JSON.stringify({{ parse: parsedAt - started, insert: insertedAt - parsedAt, layout: layoutAt - insertedAt, total: performance.now() - started }});
+    }}
+
+    // Load local font faces before the first selection, without network access.
+    if (document.fonts) {{
+        Promise.all([
+            document.fonts.load('16px "Preview Sans"'),
+            document.fonts.load('700 16px "Preview Sans"'),
+            document.fonts.load('italic 16px "Preview Sans"'),
+            document.fonts.load('14px "Preview Mono"'),
+            document.fonts.load('700 14px "Preview Mono"'),
+            document.fonts.load('16px "Preview Emoji"', '📑⚡🧭🔄🛠️'),
+        ]).catch(() => {{}});
+    }}
 
     // Code snippet copy handler
     function copySnippet(btn) {{
@@ -219,9 +348,10 @@ class MarkdownRenderer:
             ta.style.opacity = '0';
             document.body.appendChild(ta);
             ta.select();
-            document.execCommand('copy');
+            const copied = document.execCommand('copy');
             document.body.removeChild(ta);
-            setCopied();
+            if (copied) setCopied();
+            else btn.textContent = 'Select text to copy';
         }}
     }}
 
@@ -239,7 +369,7 @@ class MarkdownRenderer:
     function scrollToHeader(id) {{
         const el = document.getElementById(id);
         if (el) {{
-            el.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+            el.scrollIntoView({{ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }});
         }}
     }}
     </script>

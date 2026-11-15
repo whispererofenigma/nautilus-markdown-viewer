@@ -2,6 +2,9 @@
 Pygments code syntax highlighting, GitHub alert banners, tables, and task lists.
 """
 
+from functools import lru_cache
+from fonts import local_font_css
+
 from pygments.formatters import HtmlFormatter
 
 # Generate Pygments CSS for light (friendly) and dark (nord/monokai) themes
@@ -10,10 +13,12 @@ PYGMENTS_DARK = HtmlFormatter(style="nord-darker").get_style_defs(".codehilite")
 
 CSS_BASE = """
 :root {
-    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
-    --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --font-sans: "Preview Sans", "Preview Emoji", sans-serif;
+    --font-mono: "Preview Mono", "Preview Emoji", monospace;
     --transition-speed: 0.2s;
 }
+
+button, input, select, textarea { font-family: var(--font-sans); }
 
 /* Light Theme Variables */
 :root, html.light {
@@ -390,6 +395,14 @@ code:not([class*="language-"]):not(.hljs) {
 }
 .markdown-alert-caution .markdown-alert-title { color: var(--alert-caution-border); }
 
+/* Off-screen blocks retain semantics and are laid out near the viewport. */
+@supports (content-visibility: auto) {
+    .markdown-container > :nth-child(n+5):not(:has(svg, .math, img)) {
+        content-visibility: auto;
+        contain-intrinsic-size: auto 120px;
+    }
+}
+
 /* Images */
 img {
     max-width: 100%;
@@ -418,20 +431,39 @@ img {
 }
 """
 
+
+@lru_cache(maxsize=1)
 def get_complete_css() -> str:
-    """Return full compiled CSS including theme overrides and pygments code styles."""
+    """Compile explicitly scoped syntax colors, compatible with older WebKit."""
+    light = HtmlFormatter(style="friendly").get_style_defs("html.light .codehilite")
+    dark = HtmlFormatter(style="nord-darker").get_style_defs("html.dark .codehilite")
+    auto_dark = HtmlFormatter(style="nord-darker").get_style_defs(
+        "html:not(.light) .codehilite"
+    )
     return f"""
+    {local_font_css()}
     {CSS_BASE}
-    
-    /* Pygments Light */
-    @media (prefers-color-scheme: light) {{
-        {PYGMENTS_LIGHT}
-    }}
-    html.light {PYGMENTS_LIGHT}
-    
-    /* Pygments Dark */
+    {PYGMENTS_LIGHT}
     @media (prefers-color-scheme: dark) {{
-        :root:not(.light) {PYGMENTS_DARK}
+        {auto_dark}
     }}
-    html.dark {PYGMENTS_DARK}
+    {light}
+    {dark}
+
+    #reading-progress {{
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 3px;
+        background: var(--link-color);
+        transform: scaleX(0);
+        transform-origin: left;
+        pointer-events: none;
+        z-index: 100;
+    }}
+    @media (prefers-reduced-motion: reduce) {{
+        html {{ scroll-behavior: auto; }}
+        * {{ transition: none !important; }}
+    }}
     """

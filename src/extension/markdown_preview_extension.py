@@ -16,25 +16,24 @@ os.environ["WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS"] = "1"
 
 # Add viewer package to sys.path
 VIEWER_DIR = os.path.expanduser("~/.local/share/nautilus-markdown-viewer")
+if not os.path.isdir(VIEWER_DIR):
+    VIEWER_DIR = "/usr/share/nautilus-markdown-viewer"
 if VIEWER_DIR not in sys.path:
     sys.path.insert(0, VIEWER_DIR)
 
 import gi
+
 gi.require_version("Nautilus", "4.0")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("WebKit", "6.0")
-from gi.repository import GObject, Nautilus, Gtk, Adw, GLib
+from gi.repository import GObject, Nautilus, Gtk, Gdk, Adw, GLib
 
 from panel import MarkdownSidePanel
 
-MARKDOWN_EXTENSIONS = {
-    ".md", ".markdown", ".mdown", ".mkd", ".mdwn", ".mdx", ".rmd"
-}
+MARKDOWN_EXTENSIONS = {".md", ".markdown", ".mdown", ".mkd", ".mdwn", ".mdx", ".rmd"}
 
-MARKDOWN_MIMETYPES = {
-    "text/markdown", "text/x-markdown", "text/x-web-markdown"
-}
+MARKDOWN_MIMETYPES = {"text/markdown", "text/x-markdown", "text/x-web-markdown"}
 
 PREVIEWER_BIN = os.path.expanduser("~/.local/bin/markdown-preview")
 if not os.path.exists(PREVIEWER_BIN):
@@ -53,6 +52,20 @@ def find_widgets_by_class(root, cls):
     return results
 
 
+def find_file_views(root):
+    """Find view containers without walking thousands of file-item widgets."""
+    if isinstance(root, (Gtk.GridView, Gtk.ColumnView)):
+        return [root]
+    if isinstance(root, MarkdownSidePanel):
+        return []
+    views = []
+    child = root.get_first_child()
+    while child:
+        views.extend(find_file_views(child))
+        child = child.get_next_sibling()
+    return views
+
+
 class MarkdownPreviewExtension(GObject.GObject, Nautilus.MenuProvider):
     def __init__(self):
         super().__init__()
@@ -64,7 +77,9 @@ class MarkdownPreviewExtension(GObject.GObject, Nautilus.MenuProvider):
             display = Gdk.Display.get_default()
             if display:
                 theme = Gtk.IconTheme.get_for_display(display)
-                icon_dir = os.path.expanduser("~/.local/share/icons/hicolor/scalable/actions")
+                icon_dir = os.path.expanduser(
+                    "~/.local/share/icons/hicolor/scalable/actions"
+                )
                 if icon_dir not in theme.get_search_path():
                     theme.add_search_path(icon_dir)
         except Exception:
@@ -109,17 +124,19 @@ class MarkdownPreviewExtension(GObject.GObject, Nautilus.MenuProvider):
             name="MarkdownPreview::Preview",
             label="Preview Markdown (New Window)",
             tip="Open rich Markdown preview in standalone window",
-            icon="text-markdown-symbolic"
+            icon="text-markdown-symbolic",
         )
         item.connect("activate", self._on_activate_standalone, md_paths)
         return [item]
 
-    def get_background_items(self, current_folder: Nautilus.FileInfo) -> list[Nautilus.MenuItem]:
+    def get_background_items(
+        self, current_folder: Nautilus.FileInfo
+    ) -> list[Nautilus.MenuItem]:
         item = Nautilus.MenuItem(
             name="MarkdownPreview::TogglePanel",
             label="Toggle Markdown Preview Panel",
             tip="Show or hide the embedded Markdown preview side panel",
-            icon="text-markdown-symbolic"
+            icon="text-markdown-symbolic",
         )
         item.connect("activate", self._on_toggle_panel_from_menu)
         return [item]
@@ -149,6 +166,8 @@ class MarkdownPreviewExtension(GObject.GObject, Nautilus.MenuProvider):
             return False
 
         # Locate the main ToolbarView (the one containing TabView)
+        if not hasattr(Adw, "ToolbarView"):
+            return False
         tb_views = find_widgets_by_class(window, Adw.ToolbarView)
         main_tb = None
         for tb in tb_views:
@@ -176,7 +195,9 @@ class MarkdownPreviewExtension(GObject.GObject, Nautilus.MenuProvider):
         paned.set_shrink_end_child(False)
 
         # 2. Create the Markdown Side Panel
-        side_panel = MarkdownSidePanel(on_close_callback=lambda: toggle_btn.set_active(False))
+        side_panel = MarkdownSidePanel(
+            on_close_callback=lambda: toggle_btn.set_active(False)
+        )
         side_panel.set_visible(False)
 
         # 3. Embed TabView into Paned, and Paned into ToolbarView
@@ -196,16 +217,21 @@ class MarkdownPreviewExtension(GObject.GObject, Nautilus.MenuProvider):
         # 4. Add the Toggle Button right into the Nautilus HeaderBar
         toggle_btn = Gtk.ToggleButton(
             icon_name="text-markdown-symbolic",
-            tooltip_text="Toggle Markdown Preview Panel"
+            tooltip_text="Toggle Markdown Preview Panel",
         )
         toggle_btn.add_css_class("flat")
 
         def on_toggle_clicked(btn):
             active = btn.get_active()
+            if not active and side_panel.editor_buffer.get_modified():
+                if not side_panel.save_file():
+                    btn.set_active(True)
+                    return
             side_panel.set_visible(active)
             if active:
                 init_splitter_position()
-                self.update_panel_selection(window, side_panel)
+                self.hook_views_in_window(window)
+                self.update_panel_selection(window, side_panel, force=True)
 
         toggle_btn.connect("toggled", on_toggle_clicked)
         main_header.pack_end(toggle_btn)
@@ -215,7 +241,10 @@ class MarkdownPreviewExtension(GObject.GObject, Nautilus.MenuProvider):
             "paned": paned,
             "panel": side_panel,
             "toggle_btn": toggle_btn,
-            "hooked_views": set(),
+            "hooked_views": {},
+            "view_handlers": {},
+            "tab_view": tab_view,
+            "last_selection": object(),
         }
         self.windows_installed.add(win_id)
 
@@ -223,7 +252,11 @@ class MarkdownPreviewExtension(GObject.GObject, Nautilus.MenuProvider):
         self.hook_views_in_window(window)
 
         # Periodically check for new views / folder navigations
-        GLib.timeout_add(1000, self.refresh_views_periodically, window)
+        self.window_data[win_id]["refresh_source"] = GLib.timeout_add(
+            100, self.refresh_views_periodically, window
+        )
+        window.connect("close-request", self.on_window_close)
+        window.connect("destroy", lambda _window: self.cleanup_window(window))
         return False
 
     def hook_views_in_window(self, window):
@@ -235,45 +268,91 @@ class MarkdownPreviewExtension(GObject.GObject, Nautilus.MenuProvider):
         panel = data["panel"]
         hooked = data["hooked_views"]
 
-        # Find all NautilusFilesView widgets in the window
-        for w in find_widgets_by_class(window, Gtk.Widget):
-            if "NautilusFilesView" in type(w).__name__:
-                v_id = id(w)
-                if v_id not in hooked:
-                    hooked.add(v_id)
-                    # Connect directly to selection-changed on NautilusFilesView
-                    w.connect("selection-changed", lambda _v: self.update_panel_selection(window, panel))
+        # Bind public GTK selection models rather than private Nautilus signals.
+        # Models can change while the view widget itself remains alive.
+        for model_id, (view, model, handler) in list(hooked.items()):
+            if view.get_root() is not window or view.get_model() is not model:
+                model.disconnect(handler)
+                del hooked[model_id]
+
+        page = data["tab_view"].get_selected_page()
+        views = find_file_views(page.get_child()) if page else []
+        handlers = data["view_handlers"]
+        for view_id, (view, handler) in list(handlers.items()):
+            if view.get_root() is not window:
+                view.disconnect(handler)
+                del handlers[view_id]
+        for view in views:
+            if id(view) not in handlers:
+                handler = view.connect(
+                    "notify::model",
+                    lambda *_args: self.refresh_views_periodically(window),
+                )
+                handlers[id(view)] = (view, handler)
+            model = view.get_model()
+            if model is None or id(model) in hooked:
+                continue
+            handler = model.connect(
+                "selection-changed",
+                lambda *_args: self.update_panel_selection(window, panel),
+            )
+            hooked[id(model)] = (view, model, handler)
 
     def refresh_views_periodically(self, window):
         if id(window) in self.windows_installed:
-            self.hook_views_in_window(window)
+            if self.window_data[id(window)]["panel"].get_visible():
+                self.hook_views_in_window(window)
+                self.update_panel_selection(
+                    window, self.window_data[id(window)]["panel"]
+                )
             return True
         return False
 
-    def update_panel_selection(self, window, panel):
+    def on_window_close(self, window):
+        data = self.window_data.get(id(window))
+        if data and data["panel"].editor_buffer.get_modified():
+            if not data["panel"].save_file():
+                return True
+        return False
+
+    def cleanup_window(self, window):
+        data = self.window_data.pop(id(window), None)
+        self.windows_installed.discard(id(window))
+        if data:
+            GLib.source_remove(data["refresh_source"])
+            for _view, model, handler in data["hooked_views"].values():
+                model.disconnect(handler)
+            for view, handler in data["view_handlers"].values():
+                view.disconnect(handler)
+            data["panel"].close_resources()
+
+    def update_panel_selection(self, window, panel, force=False):
         if not panel.get_visible():
             return
 
         file_path = self.extract_selected_path(window)
+        data = self.window_data.get(id(window))
+        if data is None:
+            return
+        if not force and file_path == data["last_selection"]:
+            return
+        # Remember the event even if saving fails: polling must not reopen an
+        # error dialog every 100 ms or undo a link opened inside the preview.
+        data["last_selection"] = file_path
         panel.set_file(file_path)
 
     def extract_selected_path(self, window) -> str | None:
-        """Inspects Gtk.GridView and Gtk.ColumnView selection models in Nautilus."""
-        # 1. Search in GridView (Icon View)
-        for gv in find_widgets_by_class(window, Gtk.GridView):
-            path = self._extract_path_from_list_view(gv)
-            if path:
-                return path
-
-        # 2. Search in ColumnView (List View)
-        for cv in find_widgets_by_class(window, Gtk.ColumnView):
-            path = self._extract_path_from_list_view(cv)
-            if path:
-                return path
-
+        """Read cached selection models; never traverse the file widget tree."""
+        data = self.window_data.get(id(window))
+        if data:
+            for view, _model, _handler in data["hooked_views"].values():
+                if view.get_mapped():
+                    return self._extract_path_from_list_view(view)
         return None
 
     def _extract_path_from_list_view(self, view_widget) -> str | None:
+        if not view_widget.get_mapped():
+            return None
         model = view_widget.get_model()
         if not model or not hasattr(model, "get_selection"):
             return None

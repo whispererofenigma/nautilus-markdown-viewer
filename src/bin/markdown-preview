@@ -8,5 +8,9 @@ while [ -h "$SOURCE" ]; do
 done
 SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
 
+if [ -f "$SCRIPT_DIR/../viewer/viewer.py" ]; then
+    SCRIPT_DIR="$(cd "$SCRIPT_DIR/../viewer" && pwd)"
+fi
+
 export PYTHONPATH="$SCRIPT_DIR:$PYTHONPATH"
 exec python3 "$SCRIPT_DIR/viewer.py" "$@"

@@ -8,6 +8,9 @@ Provides rich interactive features:
 """
 
 import os
+import html
+import json
+from pathlib import Path
 import sys
 import shutil
 import subprocess
@@ -16,19 +19,23 @@ import subprocess
 os.environ["WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS"] = "1"
 
 import gi
+
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("WebKit", "6.0")
 gi.require_version("GtkSource", "5")
 from gi.repository import Gtk, Gdk, GLib, Gio, Adw, WebKit, GtkSource
 
-from renderer import MarkdownRenderer
+from loading import PreviewLoader
+from documents import save_document
 
 
 def launch_external_editor(file_path: str):
     """Explicitly launches an external text/code editor (never re-launches the previewer)."""
     # 1. VS Code
-    code_bin = shutil.which("code") or ("/snap/bin/code" if os.path.exists("/snap/bin/code") else None)
+    code_bin = shutil.which("code") or (
+        "/snap/bin/code" if os.path.exists("/snap/bin/code") else None
+    )
     if code_bin:
         subprocess.Popen([code_bin, file_path], start_new_session=True)
         return
@@ -48,17 +55,21 @@ def launch_external_editor(file_path: str):
     # 4. Fallback to generic text/plain handler if different from previewer
     app_info = Gio.AppInfo.get_default_for_type("text/plain", False)
     if app_info and app_info.get_id() != "io.github.markdown_previewer.desktop":
-        app_info.launch_uris(["file://" + file_path], None)
+        app_info.launch_uris([Path(file_path).as_uri()], None)
     else:
         # Default to nano in a terminal if nothing else exists
-        subprocess.Popen(["x-terminal-emulator", "-e", f"nano '{file_path}'"], start_new_session=True)
+        subprocess.Popen(
+            ["x-terminal-emulator", "-e", "nano", file_path], start_new_session=True
+        )
 
 
 class MarkdownViewerWindow(Adw.ApplicationWindow):
     def __init__(self, app: Adw.Application, file_path: str):
         super().__init__(application=app)
         self.file_path = os.path.abspath(file_path)
-        self.renderer = MarkdownRenderer()
+        self.loader = PreviewLoader()
+        self._last_html = None
+        self._editor_original = ""
         self.zoom_level = 1.0
         self.theme_mode = "auto"  # 'auto', 'light', 'dark'
         self.current_mode = "preview"  # 'preview' or 'editor'
@@ -69,6 +80,7 @@ class MarkdownViewerWindow(Adw.ApplicationWindow):
 
         self.setup_ui()
         self.setup_keybindings()
+        self.connect("close-request", self.on_close_request)
         self.setup_file_monitor()
         self.load_and_render()
 
@@ -89,7 +101,7 @@ class MarkdownViewerWindow(Adw.ApplicationWindow):
         dir_name = os.path.dirname(self.file_path)
         home = os.path.expanduser("~")
         if dir_name.startswith(home):
-            dir_name = "~" + dir_name[len(home):]
+            dir_name = "~" + dir_name[len(home) :]
 
         self.original_subtitle = dir_name
         self.win_title = Adw.WindowTitle(title=filename, subtitle=dir_name)
@@ -101,13 +113,12 @@ class MarkdownViewerWindow(Adw.ApplicationWindow):
 
         # Table of Contents Button & Popover
         self.toc_button = Gtk.MenuButton(
-            icon_name="view-list-bullet-symbolic",
-            tooltip_text="Table of Contents"
+            icon_name="view-list-bullet-symbolic", tooltip_text="Table of Contents"
         )
         self.toc_popover = Gtk.Popover()
         self.toc_scroll = Gtk.ScrolledWindow(
             hscrollbar_policy=Gtk.PolicyType.NEVER,
-            vscrollbar_policy=Gtk.PolicyType.AUTOMATIC
+            vscrollbar_policy=Gtk.PolicyType.AUTOMATIC,
         )
         self.toc_scroll.set_size_request(280, 360)
         self.toc_listbox = Gtk.ListBox()
@@ -120,8 +131,7 @@ class MarkdownViewerWindow(Adw.ApplicationWindow):
 
         # Reading Stats Button & Popover
         self.stats_button = Gtk.MenuButton(
-            icon_name="dialog-information-symbolic",
-            tooltip_text="Document Statistics"
+            icon_name="dialog-information-symbolic", tooltip_text="Document Statistics"
         )
         self.stats_popover = Gtk.Popover()
         self.stats_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
@@ -147,15 +157,14 @@ class MarkdownViewerWindow(Adw.ApplicationWindow):
         # Mode Toggle Button (Switches between Preview and Edit Mode)
         self.mode_btn = Gtk.Button(
             icon_name="document-edit-symbolic",
-            tooltip_text="Switch to Editor Mode (Ctrl+E)"
+            tooltip_text="Switch to Editor Mode (Ctrl+E)",
         )
         self.mode_btn.connect("clicked", lambda _: self.toggle_mode())
         self.header.pack_start(self.mode_btn)
 
         # Save Button (Active in Edit Mode)
         self.save_btn = Gtk.Button(
-            icon_name="document-save-symbolic",
-            tooltip_text="Save Changes (Ctrl+S)"
+            icon_name="document-save-symbolic", tooltip_text="Save Changes (Ctrl+S)"
         )
         self.save_btn.add_css_class("suggested-action")
         self.save_btn.set_sensitive(False)
@@ -169,8 +178,7 @@ class MarkdownViewerWindow(Adw.ApplicationWindow):
 
         # Search Toggle Button
         self.search_btn = Gtk.ToggleButton(
-            icon_name="edit-find-symbolic",
-            tooltip_text="Find in Document (Ctrl+F)"
+            icon_name="edit-find-symbolic", tooltip_text="Find in Document (Ctrl+F)"
         )
         self.search_btn.connect("toggled", self.on_search_toggle)
         self.header.pack_end(self.search_btn)
@@ -178,15 +186,14 @@ class MarkdownViewerWindow(Adw.ApplicationWindow):
         # Theme Cycle Button (Auto -> Dark -> Light)
         self.theme_btn = Gtk.Button(
             icon_name="weather-clear-night-symbolic",
-            tooltip_text="Toggle Theme (Auto / Dark / Light)"
+            tooltip_text="Toggle Theme (Auto / Dark / Light)",
         )
         self.theme_btn.connect("clicked", self.on_cycle_theme)
         self.header.pack_end(self.theme_btn)
 
         # External Editor Menu Button
         ext_menu_btn = Gtk.MenuButton(
-            icon_name="view-more-symbolic",
-            tooltip_text="More Options"
+            icon_name="view-more-symbolic", tooltip_text="More Options"
         )
         ext_popover = Gtk.Popover()
         ext_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -197,16 +204,27 @@ class MarkdownViewerWindow(Adw.ApplicationWindow):
 
         btn_open_code = Gtk.Button(label="Open in VS Code")
         btn_open_code.add_css_class("flat")
-        btn_open_code.connect("clicked", lambda _: [ext_popover.popdown(), launch_external_editor(self.file_path)])
+        btn_open_code.connect(
+            "clicked",
+            lambda _: [ext_popover.popdown(), launch_external_editor(self.file_path)],
+        )
         ext_box.append(btn_open_code)
 
         btn_open_ext = Gtk.Button(label="Open in System Text Editor")
         btn_open_ext.add_css_class("flat")
-        btn_open_ext.connect("clicked", lambda _: [
-            ext_popover.popdown(),
-            subprocess.Popen(["gnome-text-editor", self.file_path], start_new_session=True)
-            if shutil.which("gnome-text-editor") else launch_external_editor(self.file_path)
-        ])
+        btn_open_ext.connect(
+            "clicked",
+            lambda _: [
+                ext_popover.popdown(),
+                (
+                    subprocess.Popen(
+                        ["gnome-text-editor", self.file_path], start_new_session=True
+                    )
+                    if shutil.which("gnome-text-editor")
+                    else launch_external_editor(self.file_path)
+                ),
+            ],
+        )
         ext_box.append(btn_open_ext)
 
         ext_popover.set_child(ext_box)
@@ -215,8 +233,7 @@ class MarkdownViewerWindow(Adw.ApplicationWindow):
 
         # Zoom Controls MenuButton
         self.zoom_btn = Gtk.MenuButton(
-            icon_name="zoom-original-symbolic",
-            tooltip_text="Zoom (100%)"
+            icon_name="zoom-original-symbolic", tooltip_text="Zoom (100%)"
         )
         zoom_popover = Gtk.Popover()
         zoom_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -225,11 +242,17 @@ class MarkdownViewerWindow(Adw.ApplicationWindow):
         zoom_box.set_margin_start(6)
         zoom_box.set_margin_end(6)
 
-        btn_zoom_out = Gtk.Button(icon_name="zoom-out-symbolic", tooltip_text="Zoom Out (Ctrl -)")
+        btn_zoom_out = Gtk.Button(
+            icon_name="zoom-out-symbolic", tooltip_text="Zoom Out (Ctrl -)"
+        )
         btn_zoom_out.connect("clicked", lambda _: self.adjust_zoom(-0.1))
-        self.btn_zoom_reset = Gtk.Button(label="100%", tooltip_text="Reset Zoom (Ctrl 0)")
+        self.btn_zoom_reset = Gtk.Button(
+            label="100%", tooltip_text="Reset Zoom (Ctrl 0)"
+        )
         self.btn_zoom_reset.connect("clicked", lambda _: self.reset_zoom())
-        btn_zoom_in = Gtk.Button(icon_name="zoom-in-symbolic", tooltip_text="Zoom In (Ctrl +)")
+        btn_zoom_in = Gtk.Button(
+            icon_name="zoom-in-symbolic", tooltip_text="Zoom In (Ctrl +)"
+        )
         btn_zoom_in.connect("clicked", lambda _: self.adjust_zoom(+0.1))
 
         zoom_box.append(btn_zoom_out)
@@ -241,8 +264,7 @@ class MarkdownViewerWindow(Adw.ApplicationWindow):
 
         # Reload Button
         self.reload_btn = Gtk.Button(
-            icon_name="view-refresh-symbolic",
-            tooltip_text="Reload (Ctrl+R / F5)"
+            icon_name="view-refresh-symbolic", tooltip_text="Reload (Ctrl+R / F5)"
         )
         self.reload_btn.connect("clicked", lambda _: self.load_and_render())
         self.header.pack_end(self.reload_btn)
@@ -266,9 +288,13 @@ class MarkdownViewerWindow(Adw.ApplicationWindow):
         self.lbl_search_count.add_css_class("dim-label")
         search_box.append(self.lbl_search_count)
 
-        btn_find_prev = Gtk.Button(icon_name="go-up-symbolic", tooltip_text="Previous Match (Shift+Enter)")
+        btn_find_prev = Gtk.Button(
+            icon_name="go-up-symbolic", tooltip_text="Previous Match (Shift+Enter)"
+        )
         btn_find_prev.connect("clicked", lambda _: self.find_prev())
-        btn_find_next = Gtk.Button(icon_name="go-down-symbolic", tooltip_text="Next Match (Enter)")
+        btn_find_next = Gtk.Button(
+            icon_name="go-down-symbolic", tooltip_text="Next Match (Enter)"
+        )
         btn_find_next.connect("clicked", lambda _: self.find_next())
         search_box.append(btn_find_prev)
         search_box.append(btn_find_next)
@@ -294,6 +320,7 @@ class MarkdownViewerWindow(Adw.ApplicationWindow):
         self.find_controller.connect("found-text", self.on_find_found_text)
         self.find_controller.connect("failed-to-find-text", self.on_find_failed)
         self.webview.connect("decide-policy", self.on_decide_policy)
+        self.webview.connect("load-changed", self.on_preview_loaded)
         self.stack.add_named(self.webview, "preview")
 
         # 2. Editor Page (GtkSourceView)
@@ -323,7 +350,9 @@ class MarkdownViewerWindow(Adw.ApplicationWindow):
 
         # Style & Theme Management
         style_manager = Adw.StyleManager.get_default()
-        style_manager.connect("notify::dark", self.on_system_theme_changed)
+        self._theme_handler = style_manager.connect(
+            "notify::dark", self.on_system_theme_changed
+        )
         self.update_editor_theme(style_manager.get_dark())
 
     def update_editor_theme(self, is_dark: bool):
@@ -335,6 +364,7 @@ class MarkdownViewerWindow(Adw.ApplicationWindow):
 
     def setup_keybindings(self):
         controller = Gtk.EventControllerKey()
+        controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         controller.connect("key-pressed", self.on_key_pressed)
         self.add_controller(controller)
 
@@ -347,6 +377,17 @@ class MarkdownViewerWindow(Adw.ApplicationWindow):
                 self.search_btn.set_active(False)
                 self.find_controller.search_finish()
                 return True
+
+        if keyval == Gdk.KEY_F5:
+            self.load_and_render()
+            return True
+        if (
+            keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter)
+            and self.search_bar.get_search_mode()
+            and state & Gdk.ModifierType.SHIFT_MASK
+        ):
+            self.find_prev()
+            return True
 
         if ctrl:
             if keyval in (Gdk.KEY_e, Gdk.KEY_E):
@@ -378,6 +419,12 @@ class MarkdownViewerWindow(Adw.ApplicationWindow):
     def toggle_mode(self):
         """Switches between Preview Mode and Editor Mode."""
         if self.current_mode == "preview":
+            try:
+                raw_text = Path(self.file_path).read_text(encoding="utf-8")
+            except (OSError, UnicodeError) as error:
+                self.show_error("Unable to edit file", str(error))
+                return
+            self._editor_original = raw_text
             # Switch to Editor
             self.current_mode = "editor"
             self.mode_btn.set_icon_name("text-markdown-symbolic")
@@ -386,21 +433,17 @@ class MarkdownViewerWindow(Adw.ApplicationWindow):
             self.toc_button.set_sensitive(False)
 
             # Load raw content into editor buffer
-            try:
-                with open(self.file_path, "r", encoding="utf-8", errors="replace") as f:
-                    raw_text = f.read()
-                self.editor_buffer.set_text(raw_text)
-                self.editor_buffer.set_modified(False)
-                self.save_btn.set_sensitive(False)
-            except Exception as e:
-                self.editor_buffer.set_text(f"Error loading file: {e}")
+            self.editor_buffer.set_text(raw_text)
+            self.editor_buffer.set_modified(False)
+            self.save_btn.set_sensitive(False)
 
             self.stack.set_visible_child_name("editor")
             self.source_view.grab_focus()
         else:
             # Switch to Preview (auto-save if modified)
             if self.editor_buffer.get_modified():
-                self.save_file()
+                if not self.save_file():
+                    return
 
             self.current_mode = "preview"
             self.mode_btn.set_icon_name("document-edit-symbolic")
@@ -421,55 +464,89 @@ class MarkdownViewerWindow(Adw.ApplicationWindow):
 
     def save_file(self):
         """Saves editor buffer contents to disk."""
-        if not self.editor_buffer.get_modified() and self.current_mode != "editor":
-            return
+        if not self.editor_buffer.get_modified():
+            return True
 
         start = self.editor_buffer.get_start_iter()
         end = self.editor_buffer.get_end_iter()
         text = self.editor_buffer.get_text(start, end, True)
 
         try:
-            with open(self.file_path, "w", encoding="utf-8") as f:
-                f.write(text)
+            save_document(self.file_path, text, self._editor_original)
+            self._editor_original = text
             self.editor_buffer.set_modified(False)
             self.save_btn.set_sensitive(False)
             self.win_title.set_subtitle(self.original_subtitle)
-        except Exception as e:
-            dialog = Adw.MessageDialog(
-                transient_for=self,
-                heading="Error Saving File",
-                body=str(e)
-            )
-            dialog.add_response("ok", "OK")
-            dialog.present()
+            return True
+        except (OSError, UnicodeError) as error:
+            self.show_error("Error Saving File", str(error))
+            return False
+
+    def show_error(self, heading: str, message: str):
+        dialog = Adw.MessageDialog(
+            transient_for=self,
+            heading=heading,
+            body=message,
+        )
+        dialog.add_response("ok", "OK")
+        dialog.present()
 
     def load_and_render(self):
-        if not os.path.exists(self.file_path):
+        self.loader.request(self.file_path, self._render_ready)
+
+    def _render_ready(self, result, error):
+        if error:
+            self._last_html = None
             self.webview.load_html(
-                f"<div style='padding:40px;text-align:center;'><h2>File Not Found</h2><p>{self.file_path}</p></div>",
-                "file:///"
+                "<h2>Unable to open document</h2><pre>" + html.escape(error) + "</pre>",
+                "file:///",
             )
             return
+        html_output, self.toc_items, self.stats = result
+        if html_output == self._last_html:
+            return
+        self._last_html = html_output
+        self.update_toc_ui()
+        self.update_stats_ui()
+        self.webview.load_html(html_output, Path(self.file_path).parent.as_uri() + "/")
 
-        try:
-            with open(self.file_path, "r", encoding="utf-8", errors="replace") as f:
-                content = f.read()
-
-            html_output, toc, stats = self.renderer.render(content, self.file_path)
-            self.toc_items = toc
-            self.stats = stats
-
-            self.update_toc_ui()
-            self.update_stats_ui()
-
-            base_uri = "file://" + os.path.dirname(self.file_path) + "/"
-            self.webview.load_html(html_output, base_uri)
+    def on_preview_loaded(self, _webview, event):
+        if event == WebKit.LoadEvent.FINISHED:
             self.apply_theme_to_webview()
-        except Exception as e:
-            self.webview.load_html(
-                f"<div style='padding:40px;color:red;'><h2>Error Rendering Markdown</h2><pre>{e}</pre></div>",
-                "file:///"
+            if self.search_bar.get_search_mode():
+                self.on_search_text_changed(self.search_entry)
+
+    def on_close_request(self, _window):
+        if self.editor_buffer.get_modified():
+            dialog = Adw.MessageDialog(
+                transient_for=self,
+                heading="Save changes before closing?",
+                body="Your document has unsaved edits.",
             )
+            dialog.add_response("cancel", "Cancel")
+            dialog.add_response("discard", "Discard")
+            dialog.add_response("save", "Save")
+            dialog.set_default_response("save")
+            dialog.set_close_response("cancel")
+
+            def respond(_dialog, response):
+                if response == "save" and self.save_file():
+                    self.close()
+                elif response == "discard":
+                    self.editor_buffer.set_modified(False)
+                    self.close()
+
+            dialog.connect("response", respond)
+            dialog.present()
+            return True
+        Adw.StyleManager.get_default().disconnect(self._theme_handler)
+        self.loader.close()
+        if self.file_monitor:
+            self.file_monitor.cancel()
+        if self.reload_timeout_id:
+            GLib.source_remove(self.reload_timeout_id)
+            self.reload_timeout_id = 0
+        return False
 
     def update_toc_ui(self):
         while True:
@@ -500,13 +577,17 @@ class MarkdownViewerWindow(Adw.ApplicationWindow):
 
     def on_toc_item_clicked(self, _button, h_id: str):
         self.toc_popover.popdown()
-        js = f"scrollToHeader('{h_id}');"
+        js = f"scrollToHeader({json.dumps(h_id)});"
         self.webview.evaluate_javascript(js, -1, None, None, None, None)
 
     def update_stats_ui(self):
         self.lbl_stats_words.set_markup(f"<b>Words:</b> {self.stats.get('words', '0')}")
-        self.lbl_stats_chars.set_markup(f"<b>Characters:</b> {self.stats.get('chars', '0')}")
-        self.lbl_stats_time.set_markup(f"<b>Reading Time:</b> {self.stats.get('read_time', '~1 min')}")
+        self.lbl_stats_chars.set_markup(
+            f"<b>Characters:</b> {self.stats.get('chars', '0')}"
+        )
+        self.lbl_stats_time.set_markup(
+            f"<b>Reading Time:</b> {self.stats.get('read_time', '~1 min')}"
+        )
 
     def adjust_zoom(self, delta: float):
         self.zoom_level = max(0.5, min(2.5, round(self.zoom_level + delta, 2)))
@@ -609,12 +690,25 @@ class MarkdownViewerWindow(Adw.ApplicationWindow):
         return False
 
     def setup_file_monitor(self):
-        gfile = Gio.File.new_for_path(self.file_path)
-        self.file_monitor = gfile.monitor_file(Gio.FileMonitorFlags.NONE, None)
+        gfile = Gio.File.new_for_path(os.path.dirname(self.file_path))
+        self.file_monitor = gfile.monitor_directory(
+            Gio.FileMonitorFlags.WATCH_MOVES, None
+        )
         self.file_monitor.connect("changed", self.on_file_changed_on_disk)
 
     def on_file_changed_on_disk(self, _monitor, _file, _other_file, event_type):
-        if event_type in (Gio.FileMonitorEvent.CHANGES_DONE_HINT, Gio.FileMonitorEvent.CHANGED):
+        paths = [item.get_path() for item in (_file, _other_file) if item]
+        if self.file_path not in paths:
+            return
+        if event_type in (
+            Gio.FileMonitorEvent.CHANGES_DONE_HINT,
+            Gio.FileMonitorEvent.CHANGED,
+            Gio.FileMonitorEvent.CREATED,
+            Gio.FileMonitorEvent.DELETED,
+            Gio.FileMonitorEvent.RENAMED,
+            Gio.FileMonitorEvent.MOVED_IN,
+            Gio.FileMonitorEvent.MOVED_OUT,
+        ):
             # Only hot-reload if we are in preview mode and not actively editing
             if self.current_mode == "preview":
                 if self.reload_timeout_id != 0:
@@ -631,7 +725,7 @@ class MarkdownViewerApp(Adw.Application):
     def __init__(self, target_file: str = ""):
         super().__init__(
             application_id="io.github.markdown_previewer",
-            flags=Gio.ApplicationFlags.HANDLES_OPEN | Gio.ApplicationFlags.NON_UNIQUE
+            flags=Gio.ApplicationFlags.HANDLES_OPEN | Gio.ApplicationFlags.NON_UNIQUE,
         )
         self.target_file = target_file
 
@@ -641,9 +735,11 @@ class MarkdownViewerApp(Adw.Application):
 
     def do_open(self, files, _n_files, _hint):
         if files:
-            path = files[0].get_path()
-            win = MarkdownViewerWindow(self, path)
-            win.present()
+            for file in files:
+                path = file.get_path()
+                if path:
+                    win = MarkdownViewerWindow(self, path)
+                    win.present()
         else:
             self.do_activate()
 
@@ -656,6 +752,7 @@ def main():
     target_path = sys.argv[1]
     if target_path.startswith("file://"):
         from urllib.parse import unquote, urlparse
+
         target_path = unquote(urlparse(target_path).path)
 
     app = MarkdownViewerApp(target_path)
