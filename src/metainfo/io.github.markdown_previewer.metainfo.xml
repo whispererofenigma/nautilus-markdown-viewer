@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.markdown_previewer</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <name>Nautilus Markdown Viewer</name>
+  <summary>Preview and edit Markdown alongside your files</summary>
+  <description>
+    <p>Read Markdown in a resizable GNOME Files side pane or a standalone
+    GTK window. Preview tables, images, task lists, highlighted code, and equations.</p>
+    <p>Edit documents with syntax highlighting, save changes in place, and
+    follow updates from external editors. The standalone window includes search,
+    a table of contents, zoom, and light and dark themes.</p>
+    <p>The Nautilus side pane depends on the host file manager. Equations and
+    remote images require a network connection.</p>
+  </description>
+  <launchable type="desktop-id">io.github.markdown_previewer.desktop</launchable>
+  <developer id="io.github.whispererofenigma">
+    <name>Tuhin Das</name>
+  </developer>
+  <url type="homepage">https://github.com/whispererofenigma/nautilus-markdown-viewer</url>
+  <url type="bugtracker">https://github.com/whispererofenigma/nautilus-markdown-viewer/issues</url>
+  <url type="vcs-browser">https://github.com/whispererofenigma/nautilus-markdown-viewer</url>
+  <provides>
+    <binary>markdown-preview</binary>
+    <mediatype>text/markdown</mediatype>
+    <mediatype>text/x-markdown</mediatype>
+  </provides>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="1.1.0" date="2026-11-15">
+      <description>
+        <p>Faster rich previews, loading feedback, safer saves, and desktop integration fixes.</p>
+      </description>
+    </release>
+  </releases>
+</component>

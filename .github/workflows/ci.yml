@@ -1,40 +1,59 @@
-name: CI & Package Build
+name: CI
 
 on:
   push:
-    branches: [ "main", "master" ]
-    tags: [ "v*" ]
+    branches: [main]
   pull_request:
-    branches: [ "main", "master" ]
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
   validate-and-build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-
-      - name: Install Linting & Verification Tools
+          python-version: "3.12"
+      - name: Install validation tools
         run: |
-          python -m pip install --upgrade pip
-          pip install flake8 markdown pygments
-
-      - name: Verify Python Code Syntax
+          python -m pip install -r requirements-dev.txt markdown pygments
+          sudo apt-get update
+          sudo apt-get install -y desktop-file-utils appstream
+      - name: Validate code and desktop metadata
         run: |
-          python -m py_compile src/viewer/*.py src/extension/*.py
-
-      - name: Build Debian Package (.deb)
+          make test
+          black --check src/viewer src/extension tests
+          bash -n install.sh uninstall.sh packaging/build-deb.sh packaging/build-source.sh
+          desktop-file-validate src/desktop/io.github.markdown_previewer.desktop
+          appstreamcli validate --no-net src/metainfo/io.github.markdown_previewer.metainfo.xml
+          git diff --check
+      - name: Build package and checksums
         run: |
-          chmod +x packaging/build-deb.sh
-          ./packaging/build-deb.sh
-
-      - name: Upload Debian Package Artifact
-        uses: actions/upload-artifact@v4
+          bash packaging/build-deb.sh
+          sha256sum nautilus-markdown-viewer_*.deb > SHA256SUMS
+          dpkg-deb --info nautilus-markdown-viewer_*.deb
+      - uses: actions/upload-artifact@v4
         with:
           name: nautilus-markdown-viewer-deb
-          path: "*.deb"
+          path: |
+            *.deb
+            SHA256SUMS
+
+  desktop-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install desktop runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-gi python3-nautilus gir1.2-gtk-4.0 \
+            gir1.2-adw-1 gir1.2-gtksource-5 gir1.2-webkit-6.0 \
+            python3-markdown python3-pygments xvfb dbus-x11
+      - name: Run GTK and WebKit integration tests
+        env:
+          GSK_RENDERER: cairo
+        run: xvfb-run -a dbus-run-session -- make test-desktop PYTHON=/usr/bin/python3

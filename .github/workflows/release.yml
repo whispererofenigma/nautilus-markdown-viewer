@@ -1,31 +1,38 @@
-name: Auto Release
+name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    tags: ["v*"]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
-    name: Build & Publish Release
-    runs-on: ubuntu-latest
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: checks
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Build Debian Package (.deb)
+      - uses: actions/checkout@v4
+      - name: Verify version and release notes
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          chmod +x packaging/build-deb.sh
-          ./packaging/build-deb.sh
-
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+          test "$RELEASE_TAG" = "v$(cat VERSION)"
+          test -s "docs/releases/$RELEASE_TAG.md"
+      - uses: actions/download-artifact@v4
         with:
-          files: nautilus-markdown-viewer_1.0.0_all.deb
-          name: Nautilus Markdown Viewer ${{ github.ref_name }}
-          generate_release_notes: true
-          draft: false
-          prerelease: false
+          name: nautilus-markdown-viewer-deb
+      - name: Verify and publish tested artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          sha256sum --check SHA256SUMS
+          gh release create "$RELEASE_TAG" nautilus-markdown-viewer_*.deb SHA256SUMS \
+            --verify-tag --title "Nautilus Markdown Viewer $RELEASE_TAG" \
+            --notes-file "docs/releases/$RELEASE_TAG.md"

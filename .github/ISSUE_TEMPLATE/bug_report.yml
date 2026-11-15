@@ -1,0 +1,28 @@
+name: Bug report
+description: Report a reproducible problem
+body:
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Distribution, Nautilus/WebKitGTK versions, app version, and installation method
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps and minimal example
+      description: Include a small Markdown example without private information
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Relevant logs or screenshots; for lag, include file size and cold versus repeat behavior

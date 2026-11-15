@@ -1,0 +1,20 @@
+Source: nautilus-markdown-viewer
+Section: utils
+Priority: optional
+Maintainer: Tuhin Das <dastuhin.rnj@gmail.com>
+Build-Depends: debhelper-compat (= 13), dh-python, python3, python3-markdown, python3-pygments
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+Homepage: https://github.com/whispererofenigma/nautilus-markdown-viewer
+Vcs-Git: https://github.com/whispererofenigma/nautilus-markdown-viewer.git
+Vcs-Browser: https://github.com/whispererofenigma/nautilus-markdown-viewer
+
+Package: nautilus-markdown-viewer
+Architecture: all
+Depends: ${misc:Depends}, ${python3:Depends}, python3 (>= 3.10), python3-gi,
+ python3-nautilus, gir1.2-gtk-4.0, gir1.2-adw-1, gir1.2-gtksource-5,
+ gir1.2-webkit-6.0, python3-markdown, python3-pygments
+Description: Markdown previewer and editor for GNOME Files
+ Preview Markdown in a resizable Nautilus side pane or a standalone GTK window.
+ Includes syntax-highlighted editing, live document updates, tables, images,
+ highlighted code, and optional network-backed equation typesetting.

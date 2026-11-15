@@ -1,0 +1,24 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@ --with python3
+
+override_dh_auto_build:
+
+override_dh_auto_test:
+	make test PYTHON=/usr/bin/python3
+
+override_dh_auto_install:
+	install -d debian/nautilus-markdown-viewer/usr/share/nautilus-markdown-viewer
+	install -m 644 src/viewer/*.py debian/nautilus-markdown-viewer/usr/share/nautilus-markdown-viewer/
+	install -m 755 src/bin/markdown-preview debian/nautilus-markdown-viewer/usr/share/nautilus-markdown-viewer/
+	chmod 755 debian/nautilus-markdown-viewer/usr/share/nautilus-markdown-viewer/viewer.py
+	install -Dm644 src/extension/markdown_preview_extension.py debian/nautilus-markdown-viewer/usr/share/nautilus-python/extensions/markdown_preview_extension.py
+	install -Dm644 src/desktop/io.github.markdown_previewer.desktop debian/nautilus-markdown-viewer/usr/share/applications/io.github.markdown_previewer.desktop
+	install -Dm644 src/metainfo/io.github.markdown_previewer.metainfo.xml debian/nautilus-markdown-viewer/usr/share/metainfo/io.github.markdown_previewer.metainfo.xml
+	install -Dm644 src/icons/text-markdown-symbolic.svg debian/nautilus-markdown-viewer/usr/share/icons/hicolor/scalable/apps/io.github.markdown_previewer.svg
+	install -Dm644 src/icons/text-markdown-symbolic.svg debian/nautilus-markdown-viewer/usr/share/icons/hicolor/scalable/actions/text-markdown-symbolic.svg
+
+# The modules are application-private rather than installed as a Python package.
+override_dh_python3:
+	dh_python3 /usr/share/nautilus-markdown-viewer /usr/share/nautilus-python/extensions

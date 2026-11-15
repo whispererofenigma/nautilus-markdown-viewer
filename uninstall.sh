@@ -18,6 +18,8 @@ rm -f "${PREFIX}/share/nautilus-python/extensions/markdown_preview_extension.py"
 rm -f "${PREFIX}/share/icons/hicolor/scalable/actions/text-markdown-symbolic.svg"
 rm -f "${PREFIX}/share/icons/hicolor/scalable/actions/view-preview-symbolic.svg"
 rm -f "${PREFIX}/share/applications/io.github.markdown_previewer.desktop"
+rm -f "${PREFIX}/share/metainfo/io.github.markdown_previewer.metainfo.xml"
+rm -f "${PREFIX}/share/icons/hicolor/scalable/apps/io.github.markdown_previewer.svg"
 rm -f "${PREFIX}/bin/markdown-preview"
 rm -f "${PREFIX}/share/nautilus/scripts/Preview Markdown"
 

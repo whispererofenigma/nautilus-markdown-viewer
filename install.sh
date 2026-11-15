@@ -22,6 +22,9 @@ echo -e "${BOLD}${BLUE}====================================================${RES
 if command -v apt-get >/dev/null 2>&1; then
     echo -e "\n${BOLD}[1/5] Checking and installing system dependencies...${RESET}"
     REQUIRED_PKGS=(
+        "python3-gi"
+        "gir1.2-gtk-4.0"
+        "gir1.2-adw-1"
         "python3-nautilus"
         "gir1.2-gtksource-5"
         "gir1.2-webkit-6.0"
@@ -53,17 +56,22 @@ APP_DIR="${PREFIX}/share/nautilus-markdown-viewer"
 EXT_DIR="${PREFIX}/share/nautilus-python/extensions"
 ICON_DIR="${PREFIX}/share/icons/hicolor/scalable/actions"
 DESKTOP_DIR="${PREFIX}/share/applications"
+METAINFO_DIR="${PREFIX}/share/metainfo"
+APP_ICON_DIR="${PREFIX}/share/icons/hicolor/scalable/apps"
 BIN_DIR="${PREFIX}/bin"
 SCRIPTS_DIR="${PREFIX}/share/nautilus/scripts"
 
 SCRIPT_SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo -e "\n${BOLD}[2/5] Creating user installation directories...${RESET}"
-mkdir -p "${APP_DIR}" "${EXT_DIR}" "${ICON_DIR}" "${DESKTOP_DIR}" "${BIN_DIR}" "${SCRIPTS_DIR}"
+mkdir -p "${APP_DIR}" "${EXT_DIR}" "${ICON_DIR}" "${DESKTOP_DIR}" "${BIN_DIR}" "${SCRIPTS_DIR}" "${METAINFO_DIR}" "${APP_ICON_DIR}"
 
 echo -e "\n${BOLD}[3/5] Installing application files...${RESET}"
+# Remove the retired text-only preview from older installations.
+rm -f "${APP_DIR}/native_preview.py"
+
 # Copy viewer components
-cp -r "${SCRIPT_SRC_DIR}/src/viewer/"* "${APP_DIR}/"
+cp "${SCRIPT_SRC_DIR}/src/viewer/"*.py "${APP_DIR}/"
 cp "${SCRIPT_SRC_DIR}/src/bin/markdown-preview" "${APP_DIR}/"
 chmod +x "${APP_DIR}/markdown-preview" "${APP_DIR}/viewer.py"
 
@@ -77,8 +85,14 @@ cp "${SCRIPT_SRC_DIR}/src/extension/markdown_preview_extension.py" "${EXT_DIR}/"
 cp "${SCRIPT_SRC_DIR}/src/icons/text-markdown-symbolic.svg" "${ICON_DIR}/"
 cp "${SCRIPT_SRC_DIR}/src/icons/text-markdown-symbolic.svg" "${ICON_DIR}/view-preview-symbolic.svg"
 
+# Install software-catalog metadata and application icon
+cp "${SCRIPT_SRC_DIR}/src/metainfo/"*.xml "${METAINFO_DIR}/"
+cp "${SCRIPT_SRC_DIR}/src/icons/text-markdown-symbolic.svg" "${APP_ICON_DIR}/io.github.markdown_previewer.svg"
+
 # Install Desktop file
 cp "${SCRIPT_SRC_DIR}/src/desktop/io.github.markdown_previewer.desktop" "${DESKTOP_DIR}/"
+sed -i "s|^Exec=markdown-preview |Exec=\"${BIN_DIR}/markdown-preview\" |" \
+    "${DESKTOP_DIR}/io.github.markdown_previewer.desktop"
 
 # Install Nautilus script
 cp "${SCRIPT_SRC_DIR}/scripts/Preview Markdown" "${SCRIPTS_DIR}/"
