@@ -31,14 +31,23 @@ SOURCE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/nautilus-markdown-source.XXXXXX")"
 trap 'rm -rf "$SOURCE_DIR"' EXIT
 SOURCE_NAME="nautilus-markdown-viewer-${VERSION}"
 ARCHIVE_NAME="nautilus-markdown-viewer_${VERSION}.orig.tar.gz"
-git -C "$PROJECT_DIR" archive --format=tar --prefix="${SOURCE_NAME}/" HEAD | \
+
+UPSTREAM_TAG="v${VERSION}"
+if git -C "$PROJECT_DIR" rev-parse -q --verify "$UPSTREAM_TAG" >/dev/null 2>&1; then
+    UPSTREAM_REF="$UPSTREAM_TAG"
+else
+    UPSTREAM_REF="HEAD"
+fi
+
+git -C "$PROJECT_DIR" archive --format=tar --prefix="${SOURCE_NAME}/" "$UPSTREAM_REF" | \
     gzip -n > "${SOURCE_DIR}/${ARCHIVE_NAME}"
 tar -xzf "${SOURCE_DIR}/${ARCHIVE_NAME}" -C "$SOURCE_DIR"
-cp -a "${SOURCE_DIR}/${SOURCE_NAME}/packaging/debian" "${SOURCE_DIR}/${SOURCE_NAME}/debian"
+cp -a "${PROJECT_DIR}/packaging/debian" "${SOURCE_DIR}/${SOURCE_NAME}/debian"
 cat > "${SOURCE_DIR}/${SOURCE_NAME}/debian/changelog" <<CHANGELOG
 nautilus-markdown-viewer (${VERSION}-${REVISION}) ${SERIES}; urgency=medium
 
   * Package upstream release ${VERSION}.
+  * Fix dh_python3 invocation in debian/rules.
 
  -- Tuhin Das <dastuhin.rnj@gmail.com>  $(date -R)
 CHANGELOG
