@@ -41,12 +41,20 @@ To target a different series (e.g. `oracular` or `jammy`), specify `SERIES=<name
    ```
 3. Upload the signed changes file:
    ```sh
-   dput ppa:<username>/<ppa-name> dist/source/nautilus-markdown-viewer_1.1.0-1~ppa1_source.changes
+   dput ppa:whispererofenigma/nautilus-markdown-viewer dist/source/nautilus-markdown-viewer_1.1.0-1~ppa1_source.changes
    ```
 
 Launchpad will verify your OpenPGP signature against your registered Launchpad key,
 accept the upload into its build queue, and automatically build the binary `.deb`
 package for the targeted Ubuntu architecture(s).
+
+Once built, users can install via:
+
+```sh
+sudo add-apt-repository ppa:whispererofenigma/nautilus-markdown-viewer
+sudo apt update
+sudo apt install nautilus-markdown-viewer
+```
 
 ### Manual build alternative
 
