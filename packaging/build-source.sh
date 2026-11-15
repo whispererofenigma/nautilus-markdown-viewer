@@ -5,7 +5,7 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="$(cat "${PROJECT_DIR}/VERSION")"
 SERIES="${SERIES:-noble}"
-REVISION="${REVISION:-1~ppa1}"
+REVISION="${REVISION:-1~ppa2}"
 SIGN_KEY="${GPG_KEY:-}"
 
 # Auto-detect default maintainer key if present in secret keys
